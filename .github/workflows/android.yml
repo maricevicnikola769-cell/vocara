@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,17 +37,28 @@ jobs:
       - name: Kopiraj web aplikaciju u Android projekat
         run: npx cap sync android
 
-      - name: APK za probu
+      - name: APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
 
+      - name: Pripremi vocara.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk vocara.apk
+
       - name: Sacuvaj APK
         uses: actions/upload-artifact@v4
         with:
           name: vocara-apk-${{ env.VERSION_NAME }}
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: vocara.apk
+
+      - name: Objavi za preuzimanje (Releases)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: Vocara ${{ env.VERSION_NAME }}
+          files: vocara.apk
+          make_latest: true
 
       - name: Kljuc za potpis
         if: env.KEYSTORE_B64 != ''
