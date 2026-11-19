@@ -1,0 +1,73 @@
+name: Android build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - name: Preuzmi kod
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Instaliraj Capacitor
+        run: npm ci
+
+      - name: Kopiraj web aplikaciju u Android projekat
+        run: npx cap sync android
+
+      - name: APK za probu
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+
+      - name: Sacuvaj APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocara-apk-${{ env.VERSION_NAME }}
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Kljuc za potpis
+        if: env.KEYSTORE_B64 != ''
+        run: echo "$KEYSTORE_B64" | base64 -d > android/vocara-release.jks
+
+      - name: AAB za Google Play
+        if: env.KEYSTORE_B64 != ''
+        working-directory: android
+        run: |
+          ./gradlew bundleRelease \
+            -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/vocara-release.jks \
+            -Pandroid.injected.signing.store.password='${{ secrets.ANDROID_KEYSTORE_PASSWORD }}' \
+            -Pandroid.injected.signing.key.alias='${{ secrets.ANDROID_KEY_ALIAS }}' \
+            -Pandroid.injected.signing.key.password='${{ secrets.ANDROID_KEY_PASSWORD }}'
+
+      - name: Sacuvaj AAB
+        if: env.KEYSTORE_B64 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocara-google-play-${{ env.VERSION_NAME }}
+          path: android/app/build/outputs/bundle/release/*.aab
+
+      - name: Obrisi kljuc
+        if: always()
+        run: rm -f android/vocara-release.jks
