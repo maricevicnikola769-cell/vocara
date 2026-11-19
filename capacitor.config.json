@@ -2,6 +2,15 @@
   "appId": "rs.vocara.app",
   "appName": "Voćara",
   "webDir": "www",
-  "android": { "backgroundColor": "#0e1410" },
-  "ios": { "backgroundColor": "#0e1410", "contentInset": "always" }
+  "android": {
+    "backgroundColor": "#0e1410"
+  },
+  "ios": {
+    "backgroundColor": "#0e1410",
+    "contentInset": "always"
+  },
+  "server": {
+    "url": "https://vocara-voce.web.app",
+    "cleartext": false
+  }
 }
