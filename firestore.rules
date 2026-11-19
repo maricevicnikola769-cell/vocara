@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Administrator Vocare: samo on potvrdjuje uplate i aktivira tezge.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'vocara39@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    // Probna placanja karticom (bez pravog novca): ukljucena dok ih admin ne iskljuci.
+    function testPayOn() {
+      return !exists(/databases/$(database)/documents/config/app)
+        || get(/databases/$(database)/documents/config/app).data.get('testPay', true) == true;
+    }
+    // Gazdinstva (prodavci): svi citaju ponudu; prodavac menja samo svoje,
+    // ali NE moze sam da aktivira tezgu (polje "sub").
+    // Podesavanja aplikacije (npr. besplatna proba): citaju svi, menja samo admin.
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Grupe i cet kupaca: svi citaju, pise svako ko je u aplikaciji (i gost).
+    match /groups/{gid} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if isAdmin();
+    }
+    // Rezervacije i porudzbine: vide ih samo kupac i prodavac (i admin).
+    match /orders/{oid} {
+      allow read: if request.auth != null && (resource.data.buyerUid == request.auth.uid
+                  || resource.data.sellerUid == request.auth.uid || isAdmin());
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (resource.data.buyerUid == request.auth.uid
+                    || resource.data.sellerUid == request.auth.uid || isAdmin());
+      allow delete: if request.auth != null && (resource.data.buyerUid == request.auth.uid || isAdmin());
+    }
+    // Koliko je paketa rezervisano (stanje na lageru).
+    match /stock/{pid} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /farms/{uid} {
+      allow read: if true;
+      allow create: if request.auth != null && request.auth.uid == uid
+                    && request.resource.data.email == request.auth.token.email
+                    && request.resource.data.get('sub', null) == null;
+      allow update: if isAdmin()
+                    || (request.auth != null && request.auth.uid == uid
+                        && request.resource.data.email == resource.data.email
+                        && (request.resource.data.get('sub', null) == resource.data.get('sub', null) || testPayOn()));
+      allow delete: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+    }
+  }
+}

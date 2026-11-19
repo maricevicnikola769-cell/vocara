@@ -1,5 +1,5 @@
 // Voćara service worker: čuva aplikaciju za rad bez interneta
-const CACHE = 'vocara-v22';
+const CACHE = 'vocara-v23';
 const FILES = ['./', './index.html', './manifest.json', './qrcode.min.js', './firebase-app-compat.js', './firebase-auth-compat.js', './firebase-firestore-compat.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/icon-180.png'];
 self.addEventListener('install', e => {

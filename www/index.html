@@ -421,7 +421,8 @@ function endOf(start,period){if(period==='pola')return addD(start,14);const d=ne
 let FARM_SUB=LS('v4_sub')||{};
 let TINV=LS('v4_tinv')||[];
 const saveTZ=()=>{SAVE('v4_sub',FARM_SUB);SAVE('v4_tinv',TINV)};
-let FREE={on:false,until:''};
+let FREE={on:false,until:''},TESTPAY=true;
+const testPayOn=()=>TESTPAY;
 const freeOn=()=>!!(FREE.on&&(!FREE.until||FREE.until>=todayISO()));
 const subOf=f=>{const x=FARM_SUB[f];if(x&&x.until>=todayISO())return x;return freeOn()&&FARMS[f]?{plan:'profi',period:'free',from:todayISO(),until:FREE.until||addD(todayISO(),365),free:true}:x};
 const active=f=>{const x=subOf(f);return !!x&&x.until>=todayISO()};
@@ -431,9 +432,43 @@ function limOf(f){const x=subOf(f);if(!x)return {visits:0,muns:0,items:2};const 
 function buyTezga(planId){const f=state.sfarm,per=state.tzPer||'mesec',amt=TZ[planId][per];const cur=FARM_SUB[f];
   const start=active(f)?addD(cur.until,1):todayISO(),end=endOf(start,per);
   const inv={no:'T-'+String(Date.now()).slice(-5),f,plan:planId,period:per,amount:amt,from:start,until:end,paid:false};TINV.unshift(inv);saveTZ();render();payTezga(inv.no)}
-function payTezga(no){const i=TINV.find(x=>x.no===no);
-  qrSheet({title:'Plati tezgu',sub:`Tezga ${TZ[i.plan].n} · ${PER[i.period]} · ${fmtD(i.from)}–${fmtD(i.until)}`,acct:VOCARA.acct,name:VOCARA.name,amount:i.amount,purpose:`Tezga ${TZ[i.plan].n} ${i.period}`,ref:i.no.replace(/\D/g,''),sf:'221',payLabel:cloud.on?'Uplatio/la sam':'Označi kao plaćeno (demo)',
-   onPaid:()=>{if(cloud.on){const j=TINV.find(x=>x.no===no)||i;j.reported=Date.now();saveTZ();toast('Uplata prijavljena ✓ Tezga se aktivira kad uplata stigne na račun Voćare');render();return}i.paid=true;const cur=FARM_SUB[i.f];FARM_SUB[i.f]={plan:i.plan,period:i.period,from:cur&&active(i.f)?cur.from:i.from,until:i.until};saveTZ();toast(`Tezga aktivna do ${fmtD(i.until)} ✓`);render()}})}
+function payTezga(no){const i=TINV.find(x=>x.no===no);if(!i)return;cardSheet(i)}
+/* ===== PLAĆANJE TEZGE KARTICOM (probni režim: bez pravog novca) ===== */
+const luhn=n=>{let s=0,alt=false;for(let k=n.length-1;k>=0;k--){let d=+n[k];if(alt){d*=2;if(d>9)d-=9}s+=d;alt=!alt}return n.length>=13&&s%10===0};
+const cardBrand=n=>/^9891/.test(n)?'DinaCard':/^4/.test(n)?'Visa':/^(5[1-5]|2[2-7])/.test(n)?'Mastercard':/^3[47]/.test(n)?'Amex':/^(50|5[6-9]|6)/.test(n)?'Maestro':'Kartica';
+function cardFmt(el){const d=el.value.replace(/\D/g,'').slice(0,19);el.value=d.replace(/(.{4})/g,'$1 ').trim();const b=document.getElementById('cbrand');if(b)b.textContent=d?cardBrand(d):''}
+function expFmt(el){let d=el.value.replace(/\D/g,'').slice(0,4);if(d.length>2)d=d.slice(0,2)+'/'+d.slice(2);el.value=d}
+function cardSheet(inv){const test=testPayOn();
+  document.getElementById('sheet').innerHTML=`<div class="sheet" onclick="if(event.target===this)closeSheet()"><div class="in">
+   <h3 style="font-size:20px">💳 Plaćanje karticom</h3><p class="muted">Tezga ${TZ[inv.plan].n} · ${PER[inv.period]} · račun ${esc(inv.no)}</p>
+   <div style="font-size:30px;font-weight:800;margin-top:8px">${fmt(inv.amount)}</div>
+   ${test?`<div class="demo">PROBNI REŽIM: ne naplaćuje se pravi novac.<br>Probna kartica: <b>4242 4242 4242 4242</b>, bilo koji budući datum i CVC.</div>`:''}
+   <form id="cardf" onsubmit="payCard(event,'${esc(inv.no)}')" autocomplete="off">
+    <label>Ime i prezime na kartici</label><input name="cn" required placeholder="MARKO MARKOVIC" style="text-transform:uppercase">
+    <label>Broj kartice <span id="cbrand" class="muted" style="float:right"></span></label><input name="num" required inputmode="numeric" placeholder="1234 5678 9012 3456" oninput="cardFmt(this)">
+    <div class="two"><div><label>Važi do (MM/GG)</label><input name="exp" required inputmode="numeric" placeholder="12/28" oninput="expFmt(this)"></div>
+    <div><label>CVC</label><input name="cvc" required inputmode="numeric" maxlength="4" placeholder="123"></div></div>
+    <p id="cerr" class="muted" style="color:#c2412d;margin:6px 0 0"></p>
+    <button class="primary" id="cpay" style="margin-top:10px">🔒 Plati ${fmt(inv.amount)}</button></form>
+   <p class="muted" style="text-align:center;margin-top:6px">Visa · Mastercard · Maestro · DinaCard</p>
+   <button class="ghost" onclick="closeSheet()">Odustani</button></div></div>`}
+async function payCard(e,no){e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const err=t=>{document.getElementById('cerr').textContent=t};
+  const num=d.num.replace(/\D/g,''),[mm,yy]=(d.exp||'').split('/').map(x=>+x);
+  if(!luhn(num))return err('Broj kartice nije ispravan.');
+  if(!mm||mm>12||yy===undefined||isNaN(yy))return err('Datum važenja nije ispravan (MM/GG).');
+  const now=new Date(),ey=2000+yy;if(ey<now.getFullYear()||(ey===now.getFullYear()&&mm<now.getMonth()+1))return err('Kartica je istekla.');
+  if(!/^\d{3,4}$/.test(d.cvc))return err('CVC nije ispravan.');
+  if(!testPayOn())return err('Plaćanje karticom još nije povezano sa bankom. Pokušajte kasnije.');
+  if(num.startsWith('4000000000000002'))return err('Banka je odbila karticu (probna odbijena kartica).');
+  const b=document.getElementById('cpay');b.disabled=true;b.textContent='Obrada plaćanja…';await new Promise(r=>setTimeout(r,1400));
+  const i=TINV.find(x=>x.no===no);if(!i){closeSheet();return}
+  const f=i.f,t=todayISO(),cur=FARM_SUB[f],curOn=cur&&cur.until>=t&&!cur.free;const from=curOn?addD(cur.until,1):t,until=endOf(from,i.period);
+  const paid={...i,paid:true,from,until,card:{brand:cardBrand(num),last4:num.slice(-4)},paidAt:Date.now(),test:true};delete paid.f;delete paid.reported;
+  const sub={plan:i.plan,period:i.period,from:curOn?cur.from:from,until};
+  if(cloud.on&&user&&farmDocs[f]){const inv=TINV.filter(x=>x.f===f).map(x=>{const y={...x};delete y.f;return x.no===no?paid:y});
+    try{await firebase.firestore().collection('farms').doc(user.uid).update({sub,inv})}catch(ex){b.disabled=false;b.textContent=`🔒 Plati ${fmt(i.amount)}`;return err('Plaćanje nije prihvaćeno: '+fbMsg(ex))}}
+  else{Object.assign(i,paid,{f});FARM_SUB[f]=sub;saveTZ()}
+  closeSheet();toast(`Plaćeno karticom ${paid.card.brand} •••• ${paid.card.last4} ✓ Tezga aktivna do ${fmtD(until)}`);render()}
 function cancelInv(no){TINV=TINV.filter(x=>x.no!==no);saveTZ();render()}
 function scrollTz(){const el=document.getElementById('tzpanel');if(el)el.scrollIntoView({behavior:'smooth',block:'start'})}
 let state={view:'home',city:'Svi gradovi',group:null,q:'',tab:'all',sfarm:+(Object.keys(FARMS)[0]||0)};
@@ -962,9 +997,9 @@ function tezgaPanel(){const f=state.sfarm,x=subOf(f),on=active(f),per=state.tzPe
   return `<div class="panel" id="tzpanel"><h3 style="font-size:18px">🧺 Moja tezga</h3>
    ${on&&x.free?`<div class="paidtag" style="text-align:left;margin-top:8px">🎁 <b>Besplatna proba</b>: tezga je besplatna${FREE.until?` do ${fmtD(FREE.until)}`:''}.<br><span style="font-weight:500">Možete odmah da dodajete voće i najavljujete dolaske, bez plaćanja.</span></div>`:on?`<div class="paidtag" style="text-align:left;margin-top:8px">✅ Aktivna: <b>${TZ[x.plan].n}</b> · ${PER[x.period]}<br><span style="font-weight:500">do ${fmtD(x.until)} · još ${daysLeft(f)} dan${daysLeft(f)%10===1&&daysLeft(f)!==11?'':'a'}</span></div>`
      :`<div class="prev" style="background:#fdecea;color:#8b1c13;margin-top:8px">🔒 <b>Nemate aktivnu tezgu.</b> Bez tezge ne možete da objavite proizvode, najavite dolazak ni primate direktne porudžbine.${x?` Prethodna tezga je istekla ${fmtD(x.until)}.`:''}</div>`}
-   ${open.map(i=>`<div class="inv unpaid"><div style="display:flex;justify-content:space-between;gap:8px"><b>Račun ${i.no}</b>${i.reported?'<span class="st open">Čeka potvrdu uplate</span>':'<span class="st offer">Za plaćanje</span>'}</div>
+   ${open.map(i=>`<div class="inv unpaid"><div style="display:flex;justify-content:space-between;gap:8px"><b>Račun ${i.no}</b><span class="st offer">Za plaćanje</span></div>
      <div class="muted">Tezga ${TZ[i.plan].n} · ${PER[i.period]} · ${fmtD(i.from)}–${fmtD(i.until)}</div><div class="sum big"><span>Iznos</span><span>${fmt(i.amount)}</span></div>
-     ${i.reported?`<p class="muted" style="margin:6px 0">Prijavili ste uplatu ${new Date(i.reported).toLocaleDateString('sr-RS')}. Tezga se aktivira čim Voćara potvrdi da je novac stigao. Poziv na broj: <b>${i.no.replace(/\D/g,'')}</b></p>`:''}<button class="ipsbtn" onclick="payTezga('${i.no}')">📱 ${i.reported?'Ponovo prikaži IPS QR':'Plati IPS QR kodom'}</button>${i.reported?'':`<button class="ghost" onclick="cancelInv('${i.no}')">Otkaži</button>`}</div>`).join('')}
+     ${''&&i.reported?`<p class="muted" style="margin:6px 0">Prijavili ste uplatu ${new Date(i.reported).toLocaleDateString('sr-RS')}. Tezga se aktivira čim Voćara potvrdi da je novac stigao. Poziv na broj: <b>${i.no.replace(/\D/g,'')}</b></p>`:''}<button class="ipsbtn" onclick="payTezga('${i.no}')">💳 Plati karticom</button><button class="ghost" onclick="cancelInv('${i.no}')">Otkaži</button></div>`).join('')}
    ${on&&x.free?'':`   <label style="margin-top:14px">${on?'Produži tezgu':'Kupi tezgu'}</label>
    <div class="seg"><label><input type="radio" name="tzp" ${per==='pola'?'checked':''} onchange="state.tzPer='pola';render()"><span>Pola meseca</span></label><label><input type="radio" name="tzp" ${per==='mesec'?'checked':''} onchange="state.tzPer='mesec';render()"><span>Mesec dana</span></label></div>
    <div class="plans">${Object.entries(TZ).map(([id,t])=>{const vis=per==='pola'&&t.visits<99?Math.ceil(t.visits/2):t.visits;return `<div class="plan ${on&&x.plan===id?'on':''}">
@@ -973,7 +1008,7 @@ function tezgaPanel(){const f=state.sfarm,x=subOf(f),on=active(f),per=state.tzPe
      ${per==='pola'?`<div class="muted" style="font-size:12px">ili ${fmt(t.mesec)} za ceo mesec</div>`:''}
      <button class="b1" style="width:100%;margin-top:8px;padding:10px" onclick="buyTezga('${id}')">${on?'Produži':'Kupi'} · ${fmt(t[per])}</button></div>`}).join('')}</div>
    <div class="prev" style="margin-top:10px">💡 Svaka tezga je jeftinija od tezge na pijaci (u Beogradu oko 4.000 RSD mesečno + dnevna taksa).<br>✅ Bez provizije na prodaju i bez plaćenih reklama: svi farmeri se prikazuju ravnopravno.<br>✅ Direktne porudžbine su uključene u svaku tezgu, bez doplate.${on?`<br>➕ Produžena tezga počinje ${fmtD(addD(x.until,1))}, kad istekne sadašnja.`:''}</div>`}
-   ${hist.length?`<div style="margin-top:10px">${hist.map(i=>`<div class="sum"><span>${i.no} · ${TZ[i.plan].n}, ${i.period==='pola'?'pola meseca':'mesec'} · ${fmtD(i.from)}–${fmtD(i.until)}</span><span>${fmt(i.amount)} ✅</span></div>`).join('')}</div>`:''}
+   ${hist.length?`<div style="margin-top:10px">${hist.map(i=>`<div class="sum"><span>${i.no} · ${TZ[i.plan].n}, ${i.period==='pola'?'pola meseca':'mesec'} · ${fmtD(i.from)}–${fmtD(i.until)}</span><span>${fmt(i.amount)} ✅${i.card?` 💳 ••${esc(i.card.last4)}`:''}</span></div>`).join('')}</div>`:''}
    <button class="ghost" onclick="chargeSheet()">💵 Naplati kupcu na licu mesta (moj IPS QR)</button></div>`}
 function regForm(){const first=cloud.on||!Object.keys(FARMS).length;
   return `<h2 class="sec">Za prodavce</h2><p class="muted">Bez provizije i bez reklama: plaćate samo tezgu. Kupac vam plaća direktno, ceo iznos ostaje vama.</p>
@@ -1198,8 +1233,9 @@ function viewAdmin(){if(!isAdmin())return '<div class="empty">Samo za administra
   const act=Object.keys(FARMS).map(Number).filter(f=>active(f));
   return `<h2 class="sec">🛠 Admin: uplate za tezge</h2><p class="muted">Prijavljeni ste kao ${esc(user.email)}. <button class="ghost" style="width:auto;display:inline;padding:4px 10px" onclick="logout()">Odjava</button></p>
   ${ver?'':`<div class="panel" style="background:#fdecea"><b>Potvrdite e-mail adresu</b><p class="muted" style="margin:4px 0 8px">Iz bezbednosnih razloga aktiviranje tezgi radi tek kad potvrdite ${esc(ADMIN)}. Otvorite poruku od Firebase-a u Gmail-u i kliknite link, pa ovde kliknite „Proveri“.</p><button class="primary" onclick="adminVerify()">Pošalji link za potvrdu</button><button class="ghost" style="margin-top:6px" onclick="adminReload()">Proveri (već sam kliknuo link)</button></div>`}
-  <div class="panel"><h3 style="font-size:18px">🎁 Besplatna proba</h3><p class="muted" style="margin:4px 0 8px">Kad je uključena, svi registrovani prodavci imaju tezgu besplatno i mogu odmah da dodaju voće, bez uplate.</p>
+  <div class="panel"><h3 style="font-size:18px">🎁 Besplatna proba i plaćanje</h3><p class="muted" style="margin:4px 0 8px">Kad je uključena, svi registrovani prodavci imaju tezgu besplatno i mogu odmah da dodaju voće, bez uplate.</p>
    <label class="chk"><input type="checkbox" id="fron" ${FREE.on?'checked':''}> Uključi besplatnu probu za sve prodavce</label>
+   <label class="chk"><input type="checkbox" id="tpon" ${TESTPAY?'checked':''}> 💳 Probna plaćanja karticom (bez pravog novca)</label>
    <label>Besplatno do (prazno = dok ne isključite)</label><input type="date" id="frun" value="${esc(FREE.until||'')}">
    <button class="primary" style="margin-top:8px" ${ver?'':'disabled'} onclick="saveFree()">Sačuvaj</button>
    <p class="muted" style="margin-top:6px">Sada: <b>${freeOn()?`uključena${FREE.until?' do '+fmtD(FREE.until):''}`:'isključena'}</b></p></div>
@@ -1213,7 +1249,7 @@ function viewAdmin(){if(!isAdmin())return '<div class="empty">Samo za administra
   <div class="panel"><h3 style="font-size:18px">Aktivni prodavci (${act.length})</h3>${act.map(f=>`<div class="sum"><span>${esc(FARMS[f].name)} · ${esc(FARMS[f].town)} · ${subOf(f).free?'🎁 besplatna proba':TZ[subOf(f).plan].n}</span><span>${subOf(f).free&&!FREE.until?'bez roka':'do '+fmtD(subOf(f).until)}</span></div>`).join('')||'<p class="muted">Još nema aktivnih tezgi.</p>'}
   <p class="muted" style="margin-top:8px">Ukupno prodavaca: ${Object.keys(FARMS).length}</p></div>`}
 async function saveFree(){const on=document.getElementById('fron').checked,until=document.getElementById('frun').value||'';
-  try{await firebase.firestore().collection('config').doc('app').set({freeOn:on,freeUntil:until,updated:Date.now()});toast(on?'Besplatna proba uključena ✓':'Besplatna proba isključena')}catch(e){toast('Nije uspelo: '+fbMsg(e))}}
+  try{await firebase.firestore().collection('config').doc('app').set({freeOn:on,freeUntil:until,testPay:document.getElementById('tpon').checked,updated:Date.now()});toast(on?'Besplatna proba uključena ✓':'Besplatna proba isključena')}catch(e){toast('Nije uspelo: '+fbMsg(e))}}
 async function adminVerify(){try{await user.sendEmailVerification();toast('Link je poslat na '+user.email)}catch(e){toast(fbMsg(e))}}
 async function adminReload(){try{await user.reload();user=firebase.auth().currentUser;await user.getIdToken(true);toast(user.emailVerified?'E-mail potvrđen ✓':'Još nije potvrđeno');render()}catch(e){toast(fbMsg(e))}}
 async function adminActivate(f,no){const fd=farmDocs[f];if(!fd)return;const d=fd.data;const inv=(d.inv||[]).map(x=>({...x}));const i=inv.find(x=>x.no===no);if(!i)return;
@@ -1229,7 +1265,7 @@ function cloudInit(){if(!window.firebase||!firebase.initializeApp)return;groups=
   cloud.on=true;
   firebase.firestore().collection('groups').onSnapshot(applyGroups,()=>{});
   firebase.firestore().collection('stock').onSnapshot(sn=>{for(const k of Object.keys(stockMap))delete stockMap[k];sn.forEach(d=>{stockMap[d.id]=d.data().taken||0});softRender()},()=>{});
-  firebase.firestore().collection('config').doc('app').onSnapshot(d=>{const x=d.exists?d.data():{};FREE={on:!!x.freeOn,until:x.freeUntil||''};softRender()},()=>{});
+  firebase.firestore().collection('config').doc('app').onSnapshot(d=>{const x=d.exists?d.data():{};FREE={on:!!x.freeOn,until:x.freeUntil||''};TESTPAY=x.testPay!==false;softRender()},()=>{});
   const listen=()=>{if(farmsUnsub)farmsUnsub();farmsUnsub=firebase.firestore().collection('farms').onSnapshot(applyFarms,err=>{cloud.ready=true;cloud.err='Baza nije dostupna: '+fbMsg(err);render()})};
   firebase.auth().onAuthStateChanged(async u=>{
    if(!u){authUid=null;user=null;try{await firebase.auth().signInAnonymously()}catch(e){cloud.err='Prijava gosta nije uključena: '+fbMsg(e);render()}return}
