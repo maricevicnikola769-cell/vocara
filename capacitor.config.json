@@ -1,0 +1,7 @@
+{
+  "appId": "rs.vocara.app",
+  "appName": "Voćara",
+  "webDir": "www",
+  "android": { "backgroundColor": "#0e1410" },
+  "ios": { "backgroundColor": "#0e1410", "contentInset": "always" }
+}
